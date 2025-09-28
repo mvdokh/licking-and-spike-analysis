@@ -15,4 +15,7 @@ electrode.cfg
 
 Pre Processing Required:
 1. multiply 1st column spikes.csv by 30,000
-2. create new file for each interval duration 
+2. create new pico.csv file for each interval duration 
+    no, I now have interval duration as 3rd column
+    750, 300, 150 (+/- 4 for each)
+    Unit here is 

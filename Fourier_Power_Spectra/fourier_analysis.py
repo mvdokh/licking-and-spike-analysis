@@ -82,9 +82,7 @@ class VoltageRecordingAnalyzer:
         --------
         tuple : (data, time) where data is (n_samples, n_channels) and time is (n_samples,)
         """
-        # Convert Windows path if needed
-        file_path = self.convert_windows_path_to_wsl(file_path)
-        
+        # Use the file path as provided (no conversion)
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
         
