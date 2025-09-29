@@ -277,7 +277,8 @@ def create_psth_raster_plot(trial_spikes, unit, duration, bin_size_ms=1,
 
 def run_psth_analysis(unit, duration, bin_size_ms=1, start_time=None, end_time=None, 
                      max_trials=None, pre_interval_ms=0, post_interval_ms=0, 
-                     smooth_window=None, trial_ranges=None, spikes_file=None, intervals_file=None):
+                     smooth_window=None, trial_ranges=None, spikes_file=None, intervals_file=None,
+                     save=False, output_path=None):
     """
     Main function to run PSTH analysis
     
@@ -321,7 +322,9 @@ def run_psth_analysis(unit, duration, bin_size_ms=1, start_time=None, end_time=N
                 smooth_window=smooth_window, 
                 trial_ranges=trial_ranges, 
                 spikes_file=spikes_file, 
-                intervals_file=intervals_file
+                intervals_file=intervals_file,
+                save=save,
+                output_path=output_path
             )
             results.append(result)
         
@@ -372,6 +375,27 @@ def run_psth_analysis(unit, duration, bin_size_ms=1, start_time=None, end_time=N
     fig, axes = create_psth_raster_plot(trial_spikes, unit, duration, 
                                        bin_size_ms, max_trials=max_trials, 
                                        smooth_window=smooth_window, trial_ranges=trial_ranges)
+    
+    # Save plot if requested
+    if save and fig and output_path:
+        # Create output directory if it doesn't exist
+        os.makedirs(output_path, exist_ok=True)
+        
+        # Create filename with parameters
+        filename = f"psth_raster_unit_{unit}_dur_{duration}ms_bin_{bin_size_ms}ms"
+        if pre_interval_ms > 0 or post_interval_ms > 0:
+            filename += f"_pre{pre_interval_ms}_post{post_interval_ms}"
+        if smooth_window:
+            filename += f"_smooth{smooth_window}"
+        if trial_ranges:
+            filename += f"_ranges{len(trial_ranges)}"
+        elif max_trials:
+            filename += f"_max{max_trials}"
+        filename += ".png"
+        
+        filepath = os.path.join(output_path, filename)
+        fig.savefig(filepath, dpi=300, bbox_inches='tight')
+        print(f"Saved plot to: {filepath}")
     
     print("="*60)
     
