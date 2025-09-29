@@ -13,4 +13,6 @@ Quality Control
         d. Show plot of all UNITS ordered by firing rate
         e. Show electrode schematic based on .cfg with heatmap of firing / electrode
 
-2. Fourier Power Spectra
+2. Fourier Power Spectra?
+
+1. List number of intervals for each interval length
