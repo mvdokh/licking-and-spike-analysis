@@ -14,8 +14,5 @@ electrode.cfg
     columns: electrode, electrode, ML coord, DV coord
 
 Pre Processing Required:
-1. multiply 1st column spikes.csv by 30,000
-2. create new pico.csv file for each interval duration 
-    no, I now have interval duration as 3rd column
-    750, 300, 150 (+/- 4 for each)
-    Unit here is 
+1. divide first 3 columns of semi_from_table_designer.csv by 30,000
+
