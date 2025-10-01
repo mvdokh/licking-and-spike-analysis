@@ -73,6 +73,77 @@ def filter_intervals_by_duration(intervals_df: pd.DataFrame, target_duration_ms:
     print(f"Found {len(filtered)} intervals with duration {target_duration_ms}ms (±1ms)")
     return filtered
 
+def load_whisking_intervals(whisking_file: str) -> pd.DataFrame:
+    """
+    Load whisking interval data from CSV file.
+    
+    Args:
+        whisking_file: Path to whisking.csv file containing intervals to exclude
+        
+    Returns:
+        DataFrame with whisking intervals
+    """
+    whisking_file = os.path.abspath(whisking_file)
+    print(f"Loading whisking intervals from: {whisking_file}")
+    
+    whisking_df = pd.read_csv(whisking_file)
+    whisking_df.columns = whisking_df.columns.str.strip()  # Clean column names
+    
+    print(f"Loaded {len(whisking_df)} whisking intervals to exclude")
+    return whisking_df
+
+def filter_intervals_exclude_whisking(intervals_df: pd.DataFrame, whisking_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Filter out pico intervals that overlap with whisking intervals.
+    
+    Args:
+        intervals_df: DataFrame with pico interval data (times in seconds)
+        whisking_df: DataFrame with whisking intervals to exclude (times assumed to be in same units)
+        
+    Returns:
+        Filtered DataFrame with whisking intervals excluded
+    """
+    if whisking_df is None or len(whisking_df) == 0:
+        print("No whisking intervals to exclude")
+        return intervals_df
+    
+    # Convert whisking intervals to seconds by dividing by 30,000
+    print("Converting whisking intervals to seconds (dividing by 30,000)...")
+    whisking_starts = whisking_df['Start'].values / 30000.0
+    whisking_ends = whisking_df['End'].values / 30000.0
+    print(f"Converted {len(whisking_starts)} whisking intervals to seconds")
+    
+    # Filter out intervals that overlap with any whisking period
+    original_count = len(intervals_df)
+    filtered_intervals = []
+    
+    for idx, interval in intervals_df.iterrows():
+        pico_start = interval['pico_Interval Start']
+        pico_end = interval['pico_Interval End']
+        
+        # Check if this pico interval overlaps with any whisking interval
+        overlaps = False
+        for w_start, w_end in zip(whisking_starts, whisking_ends):
+            # Check for overlap: intervals overlap if one starts before the other ends
+            if pico_start < w_end and pico_end > w_start:
+                overlaps = True
+                break
+        
+        if not overlaps:
+            filtered_intervals.append(interval)
+    
+    # Convert back to DataFrame
+    if filtered_intervals:
+        result_df = pd.DataFrame(filtered_intervals)
+    else:
+        result_df = intervals_df.iloc[0:0].copy()  # Empty DataFrame with same structure
+    
+    excluded_count = original_count - len(result_df)
+    print(f"Excluded {excluded_count} intervals that overlapped with whisking periods")
+    print(f"Remaining intervals: {len(result_df)}")
+    
+    return result_df
+
 def compute_psth_for_unit(spikes_df: pd.DataFrame, intervals_df: pd.DataFrame, 
                          unit: int, bin_size_ms: float, pre_interval_ms: float, 
                          post_interval_ms: float, duration_ms: float, smooth_window: Optional[int] = None) -> np.ndarray:
@@ -183,6 +254,7 @@ def create_normalized_psth_heatmap(spikes_file: str, intervals_file: str,
                                   duration_ms: float, units: Optional[List[int]] = None,
                                   bin_size_ms: float = 0.6, pre_interval_ms: float = 5, 
                                   post_interval_ms: float = 10, smooth_window: Optional[int] = 5,
+                                  exclude_whisking: bool = False, whisking_file: Optional[str] = None,
                                   save_path: Optional[str] = None) -> Tuple[plt.Figure, np.ndarray, List[int], np.ndarray]:
     """
     Create a Z-score normalized PSTH heatmap for multiple units.
@@ -196,6 +268,8 @@ def create_normalized_psth_heatmap(spikes_file: str, intervals_file: str,
         pre_interval_ms: Time before interval in ms
         post_interval_ms: Time after interval in ms
         smooth_window: Number of bins for smoothing (optional)
+        exclude_whisking: Whether to exclude intervals that overlap with whisking periods
+        whisking_file: Path to whisking.csv file (required if exclude_whisking=True)
         save_path: Path to save the figure (optional)
         
     Returns:
@@ -207,8 +281,16 @@ def create_normalized_psth_heatmap(spikes_file: str, intervals_file: str,
     # Filter intervals by duration
     filtered_intervals = filter_intervals_by_duration(intervals_df, duration_ms)
     
+    # Exclude whisking intervals if requested
+    if exclude_whisking:
+        if whisking_file is None:
+            raise ValueError("whisking_file must be provided when exclude_whisking=True")
+        
+        whisking_df = load_whisking_intervals(whisking_file)
+        filtered_intervals = filter_intervals_exclude_whisking(filtered_intervals, whisking_df)
+    
     if len(filtered_intervals) == 0:
-        print(f"No intervals found for duration {duration_ms}ms")
+        print(f"No intervals found for duration {duration_ms}ms after filtering")
         return None, None, None, None
     
     # Get units to analyze
@@ -299,6 +381,7 @@ def create_multiple_duration_normalized_heatmaps(spikes_file: str, intervals_fil
                                                durations_ms: List[float], units: Optional[List[int]] = None,
                                                bin_size_ms: float = 0.6, pre_interval_ms: float = 5,
                                                post_interval_ms: float = 10, smooth_window: Optional[int] = 5,
+                                               exclude_whisking: bool = False, whisking_file: Optional[str] = None,
                                                save_dir: Optional[str] = None) -> Dict[float, Tuple]:
     """
     Create Z-score normalized PSTH heatmaps for multiple interval durations.
@@ -312,6 +395,8 @@ def create_multiple_duration_normalized_heatmaps(spikes_file: str, intervals_fil
         pre_interval_ms: Time before interval in ms
         post_interval_ms: Time after interval in ms
         smooth_window: Number of bins for smoothing (optional)
+        exclude_whisking: Whether to exclude intervals that overlap with whisking periods
+        whisking_file: Path to whisking.csv file (required if exclude_whisking=True)
         save_dir: Directory to save figures (optional)
         
     Returns:
@@ -332,7 +417,7 @@ def create_multiple_duration_normalized_heatmaps(spikes_file: str, intervals_fil
         result = create_normalized_psth_heatmap(
             spikes_file, intervals_file, duration, units,
             bin_size_ms, pre_interval_ms, post_interval_ms, 
-            smooth_window, save_path
+            smooth_window, exclude_whisking, whisking_file, save_path
         )
         
         results[duration] = result
