@@ -75,7 +75,7 @@ def filter_intervals_by_duration(intervals_df: pd.DataFrame, target_duration_ms:
 
 def compute_psth_for_unit(spikes_df: pd.DataFrame, intervals_df: pd.DataFrame, 
                          unit: int, bin_size_ms: float, pre_interval_ms: float, 
-                         post_interval_ms: float, smooth_window: Optional[int] = None) -> np.ndarray:
+                         post_interval_ms: float, duration_ms: float, smooth_window: Optional[int] = None) -> np.ndarray:
     """
     Compute PSTH for a single unit.
     
@@ -85,7 +85,8 @@ def compute_psth_for_unit(spikes_df: pd.DataFrame, intervals_df: pd.DataFrame,
         unit: Unit number to analyze
         bin_size_ms: Bin size in milliseconds
         pre_interval_ms: Time before interval in ms
-        post_interval_ms: Time after interval in ms
+        post_interval_ms: Time after interval END in ms
+        duration_ms: Duration of the interval in ms
         smooth_window: Number of bins for smoothing (optional)
         
     Returns:
@@ -102,11 +103,12 @@ def compute_psth_for_unit(spikes_df: pd.DataFrame, intervals_df: pd.DataFrame,
     bin_size_s = bin_size_ms / 1000.0
     pre_interval_s = pre_interval_ms / 1000.0
     post_interval_s = post_interval_ms / 1000.0
+    duration_s = duration_ms / 1000.0
     
-    # Create time bins
-    total_time_s = pre_interval_s + post_interval_s
+    # Create time bins - now total time includes pre + duration + post
+    total_time_s = pre_interval_s + duration_s + post_interval_s
     n_bins = int(total_time_s / bin_size_s)
-    time_bins = np.linspace(-pre_interval_s, post_interval_s, n_bins + 1)
+    time_bins = np.linspace(-pre_interval_s, duration_s + post_interval_s, n_bins + 1)
     
     # Collect spike counts for each interval
     spike_counts_all_trials = []
@@ -114,9 +116,9 @@ def compute_psth_for_unit(spikes_df: pd.DataFrame, intervals_df: pd.DataFrame,
     for _, interval in intervals_df.iterrows():
         interval_start = interval['pico_Interval Start']
         
-        # Get spikes relative to interval start
+        # Get spikes relative to interval start - now extends to post_interval_ms after interval END
         trial_start = interval_start - pre_interval_s
-        trial_end = interval_start + post_interval_s
+        trial_end = interval_start + duration_s + post_interval_s
         
         # Find spikes in this trial window
         trial_spikes = unit_spikes[(unit_spikes >= trial_start) & (unit_spikes < trial_end)]
@@ -222,7 +224,7 @@ def create_normalized_psth_heatmap(spikes_file: str, intervals_file: str,
     for unit in units:
         psth = compute_psth_for_unit(spikes_df, filtered_intervals, unit, 
                                    bin_size_ms, pre_interval_ms, post_interval_ms, 
-                                   smooth_window)
+                                   duration_ms, smooth_window)
         if len(psth) > 0:
             psth_data.append(psth)
             valid_units.append(unit)
@@ -238,13 +240,18 @@ def create_normalized_psth_heatmap(spikes_file: str, intervals_file: str,
     print("Applying Z-score normalization...")
     normalized_heatmap_data = z_score_normalize_psth(raw_heatmap_data)
     
-    # Create time axis
+    # Create time axis - now post_interval_ms is time after interval END
     bin_size_s = bin_size_ms / 1000.0
     pre_interval_s = pre_interval_ms / 1000.0
     post_interval_s = post_interval_ms / 1000.0
-    total_time_s = pre_interval_s + post_interval_s
+    
+    # Total time includes: pre_interval + duration + post_interval
+    total_time_s = pre_interval_s + (duration_ms / 1000.0) + post_interval_s
     n_bins = int(total_time_s / bin_size_s)
-    time_bins = np.linspace(-pre_interval_ms, post_interval_ms, n_bins)
+    
+    # Time axis runs from -pre_interval_ms to (duration_ms + post_interval_ms)
+    time_end = duration_ms + post_interval_ms
+    time_bins = np.linspace(-pre_interval_ms, time_end, n_bins)
     
     # Create the heatmap
     fig, ax = plt.subplots(figsize=(12, 8))
@@ -252,8 +259,11 @@ def create_normalized_psth_heatmap(spikes_file: str, intervals_file: str,
     # Plot normalized heatmap with diverging colormap
     vmax = np.max(np.abs(normalized_heatmap_data))
     im = ax.imshow(normalized_heatmap_data, aspect='auto', origin='lower', 
-                   extent=[-pre_interval_ms, post_interval_ms, 0, len(valid_units)],
+                   extent=[-pre_interval_ms, time_end, 0, len(valid_units)],
                    cmap='RdBu_r', interpolation='nearest', vmin=-vmax, vmax=vmax)
+    
+    # Add light grey highlight for the interval period
+    ax.axvspan(0, duration_ms, alpha=0.2, color='lightgrey', zorder=1)
     
     # Customize the plot
     ax.set_xlabel('Time relative to interval start (ms)', fontsize=12)
@@ -262,8 +272,9 @@ def create_normalized_psth_heatmap(spikes_file: str, intervals_file: str,
                 f'Bin size: {bin_size_ms}ms, Smoothing: {smooth_window} bins', 
                 fontsize=14, fontweight='bold')
     
-    # Add vertical line at interval start
+    # Add vertical lines at interval start and end
     ax.axvline(x=0, color='black', linestyle='--', alpha=0.8, linewidth=2)
+    ax.axvline(x=duration_ms, color='black', linestyle='--', alpha=0.8, linewidth=2)
     
     # Set Y-axis ticks to show unit numbers centered on each unit's row
     tick_positions = [i + 0.5 for i in range(len(valid_units))]
@@ -427,7 +438,7 @@ def compare_raw_vs_normalized(spikes_file: str, intervals_file: str, duration_ms
     for unit in units:
         psth = compute_psth_for_unit(spikes_df, filtered_intervals, unit, 
                                    bin_size_ms, pre_interval_ms, post_interval_ms, 
-                                   smooth_window)
+                                   duration_ms, smooth_window)
         if len(psth) > 0:
             psth_data.append(psth)
             valid_units.append(unit)
