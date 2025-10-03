@@ -249,43 +249,59 @@ def create_psth_raster_plot(trial_spikes, unit, duration, bin_size_ms=1,
         
         # Apply smoothing if requested
         if smooth_window and smooth_window > 1:
-            firing_rate = uniform_filter1d(firing_rate, size=smooth_window)
-            smooth_label = f" (smoothed, window={smooth_window})"
+            firing_rate_smooth = uniform_filter1d(firing_rate, size=smooth_window)
+            print(f"Applied smoothing with window size: {smooth_window}")
         else:
-            smooth_label = ""
+            firing_rate_smooth = firing_rate
         
-        # Plot PSTH
-        ax1.plot(bin_centers, firing_rate, 'b-', linewidth=1.5)
-        ax1.fill_between(bin_centers, firing_rate, alpha=0.3, color='blue')
+        # Use both bar and line plot for better visibility
+        ax1.bar(bin_centers, firing_rate, width=bin_size_ms*0.8, 
+                alpha=0.6, color='lightblue', edgecolor='blue', linewidth=0.5)
+        
+        # Always plot the raw data line connecting the bars
+        ax1.plot(bin_centers, firing_rate, color='darkblue', linewidth=1, alpha=0.6, label='Raw')
+        
+        # Plot smoothed line if smoothing was applied
+        if smooth_window and smooth_window > 1:
+            ax1.plot(bin_centers, firing_rate_smooth, color='red', linewidth=2, alpha=0.9, label='Smoothed')
+            ax1.legend()
+        else:
+            # Even without smoothing, show the legend for consistency
+            ax1.legend()
+        
+        print(f"PSTH: {len(all_spike_times)} spikes across {len(trial_spikes)} trials")
+        print(f"Max firing rate: {np.max(firing_rate):.2f} Hz")
     else:
-        ax1.text(0.5, 0.5, 'No spikes found', ha='center', va='center', transform=ax1.transAxes)
+        print("No spikes found for PSTH")
     
     # Add vertical lines to mark interval boundaries
     if pre_ms > 0:
-        ax1.axvline(x=0, color='green', linestyle='--', alpha=0.7, label='Interval Start')
+        ax1.axvline(x=0, color='red', linestyle='--', alpha=0.7)
     if post_ms > 0:
-        ax1.axvline(x=avg_duration_ms, color='red', linestyle='--', alpha=0.7, label='Interval End')
+        ax1.axvline(x=avg_duration_ms, color='red', linestyle='--', alpha=0.7)
     
     ax1.set_ylabel('Firing Rate (Hz)')
     title_text = f'PSTH - Unit {unit} | {frequency_hz:.1f} Hz | Duration: {duration:.1f}ms | Trials: {len(trial_spikes)}'
     if pre_ms > 0 or post_ms > 0:
         title_text += f' | Pre: {pre_ms}ms, Post: {post_ms}ms'
     if smooth_window and smooth_window > 1:
-        title_text += f' | Smoothed (w={smooth_window})'
+        title_text += f' | Smooth: {smooth_window}'
     ax1.set_title(title_text)
     ax1.grid(True, alpha=0.3)
     ax1.set_xlim(min_time, max_time)
     
     # Raster plot (bottom plot)
     for plot_idx, trial in enumerate(trial_spikes):
-        if trial['spike_times']:
-            y_pos = compact_mapping[plot_idx] if 'compact_mapping' in locals() else plot_idx
-            ax2.scatter(trial['spike_times'], [y_pos] * len(trial['spike_times']), 
-                       s=1, c='black', alpha=0.8)
+        spike_times = trial['spike_times']
+        if spike_times:
+            # Use sequential y position for clean appearance
+            y_pos = plot_idx
+            ax2.scatter(spike_times, [y_pos] * len(spike_times), 
+                       s=1, color='black', alpha=0.8)
     
     # Add vertical lines to raster plot as well
     if pre_ms > 0:
-        ax2.axvline(x=0, color='green', linestyle='--', alpha=0.7)
+        ax2.axvline(x=0, color='red', linestyle='--', alpha=0.7)
     if post_ms > 0:
         ax2.axvline(x=avg_duration_ms, color='red', linestyle='--', alpha=0.7)
     
@@ -304,10 +320,10 @@ def create_psth_raster_plot(trial_spikes, unit, duration, bin_size_ms=1,
     print(f"Created plot with {len(trial_spikes)} trials")
     print(f"Total spikes: {len(all_spike_times)}")
     if len(all_spike_times) > 0 and len(trial_spikes) > 0:
-        avg_rate = len(all_spike_times) / (len(trial_spikes) * (max_time - min_time) / 1000.0)
-        print(f"Average firing rate: {avg_rate:.2f} spikes/sec")
+        total_time_s = (max_time - min_time) / 1000.0
+        print(f"Average firing rate: {len(all_spike_times) / (len(trial_spikes) * total_time_s):.2f} Hz")
     
-    return fig, trial_spikes
+    return fig, (ax1, ax2)
 
 
 def run_psth_analysis_digitalin(unit, duration, bin_size_ms=1, start_time=None, end_time=None, 
