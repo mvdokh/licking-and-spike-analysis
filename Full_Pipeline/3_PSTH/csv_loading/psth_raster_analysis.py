@@ -50,18 +50,51 @@ def filter_intervals_by_duration(intervals_df, target_duration_ms):
     return filtered
 
 def filter_intervals_by_timeframe(intervals_df, start_time=None, end_time=None):
-    """Filter intervals by time frame"""
+    """Filter intervals by a single time frame (in seconds)."""
     if start_time is None and end_time is None:
         return intervals_df
-    
+
     filtered = intervals_df.copy()
     if start_time is not None:
         filtered = filtered[filtered['pico_Interval Start'] >= start_time]
     if end_time is not None:
         filtered = filtered[filtered['pico_Interval End'] <= end_time]
-    
-    print(f"Filtered to {len(filtered)} intervals within timeframe")
+
+    print(f"Filtered to {len(filtered)} intervals within timeframe [{start_time}, {end_time}]")
     return filtered
+
+def filter_intervals_by_timeframes(intervals_df, start_times=None, end_times=None):
+    """Filter intervals by multiple time frames (in seconds), preserving the order of windows.
+
+    Parameters:
+    - start_times: list of start times (seconds)
+    - end_times: list of end times (seconds)
+
+    Returns a concatenated DataFrame of intervals from each window in the provided order.
+    """
+    if not start_times and not end_times:
+        return intervals_df
+
+    if start_times is None or end_times is None or len(start_times) != len(end_times):
+        raise ValueError("start_times and end_times must be provided with equal lengths")
+
+    windowed_parts = []
+    total_count = 0
+    for i, (s, e) in enumerate(zip(start_times, end_times)):
+        part = filter_intervals_by_timeframe(intervals_df, s, e)
+        # Ensure sorted by start for deterministic order within window
+        part = part.sort_values(by=['pico_Interval Start', 'pico_Interval End']).copy()
+        windowed_parts.append(part)
+        total_count += len(part)
+        print(f"Window {i+1}: [{s}, {e}] -> {len(part)} intervals")
+
+    if windowed_parts:
+        concatenated = pd.concat(windowed_parts, ignore_index=True)
+    else:
+        concatenated = intervals_df.iloc[0:0].copy()
+
+    print(f"Total intervals after multi-window filtering: {total_count}")
+    return concatenated
 
 def get_spikes_for_intervals(spikes_df, intervals_df, unit, pre_interval_ms=0, post_interval_ms=0):
     """Get spikes for a specific unit within intervals with optional pre/post padding"""
@@ -276,6 +309,7 @@ def create_psth_raster_plot(trial_spikes, unit, duration, bin_size_ms=1,
     return fig, (ax1, ax2)
 
 def run_psth_analysis(unit, duration, bin_size_ms=1, start_time=None, end_time=None, 
+                     start_times=None, end_times=None,
                      max_trials=None, pre_interval_ms=0, post_interval_ms=0, 
                      smooth_window=None, trial_ranges=None, spikes_file=None, intervals_file=None,
                      save=False, output_path=None):
@@ -287,7 +321,9 @@ def run_psth_analysis(unit, duration, bin_size_ms=1, start_time=None, end_time=N
     - duration: Interval duration to filter in milliseconds (25, 10, 5)
     - bin_size_ms: Bin size in milliseconds for PSTH
     - start_time: Start time for trial filtering in seconds (optional)
-    - end_time: End time for trial filtering in seconds (optional)  
+    - end_time: End time for trial filtering in seconds (optional)
+    - start_times: List of start times for multiple windows in seconds (optional)
+    - end_times: List of end times for multiple windows in seconds (optional)
     - max_trials: Maximum number of trials to plot (optional)
     - pre_interval_ms: Milliseconds before interval to include (optional)
     - post_interval_ms: Milliseconds after interval to include (optional)
@@ -316,6 +352,8 @@ def run_psth_analysis(unit, duration, bin_size_ms=1, start_time=None, end_time=N
                 bin_size_ms=bin_size_ms,
                 start_time=start_time, 
                 end_time=end_time,
+                start_times=start_times,
+                end_times=end_times,
                 max_trials=max_trials, 
                 pre_interval_ms=pre_interval_ms, 
                 post_interval_ms=post_interval_ms,
@@ -340,8 +378,13 @@ def run_psth_analysis(unit, duration, bin_size_ms=1, start_time=None, end_time=N
     print(f"Unit: {unit}")
     print(f"Duration: {duration}ms")
     print(f"Bin size: {bin_size_ms}ms")
-    if start_time: print(f"Start time: {start_time}")
-    if end_time: print(f"End time: {end_time}")
+    if start_times and end_times:
+        print("Time windows:")
+        for i, (s, e) in enumerate(zip(start_times, end_times), start=1):
+            print(f"  {i}. [{s}, {e}]")
+    else:
+        if start_time is not None: print(f"Start time: {start_time}")
+        if end_time is not None: print(f"End time: {end_time}")
     if trial_ranges:
         print(f"Trial ranges: {trial_ranges}")
         max_trials = None  # Override max_trials when trial_ranges is specified
@@ -359,8 +402,10 @@ def run_psth_analysis(unit, duration, bin_size_ms=1, start_time=None, end_time=N
     # Filter intervals by duration (duration parameter is in ms)
     filtered_intervals = filter_intervals_by_duration(intervals_df, duration)
     
-    # Filter by timeframe if specified
-    if start_time or end_time:
+    # Filter by timeframe if specified (multiple windows take precedence if provided)
+    if start_times and end_times:
+        filtered_intervals = filter_intervals_by_timeframes(filtered_intervals, start_times, end_times)
+    elif start_time is not None or end_time is not None:
         filtered_intervals = filter_intervals_by_timeframe(filtered_intervals, start_time, end_time)
     
     if len(filtered_intervals) == 0:
