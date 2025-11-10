@@ -16,6 +16,154 @@ def load_keypoints(filepath):
     return df
 
 
+def detect_licks(df, max_gap=5):
+    """
+    Detect individual licks as consecutive frame sequences
+    
+    Parameters:
+    -----------
+    df : DataFrame with columns [Frame, X, Y, Probability]
+    max_gap : int, maximum frame gap to still consider part of same lick
+    
+    Returns:
+    --------
+    list of DataFrames, each containing frames from one lick
+    """
+    df_sorted = df.sort_values('Frame').reset_index(drop=True)
+    
+    licks = []
+    current_lick = [df_sorted.iloc[0]]
+    
+    for i in range(1, len(df_sorted)):
+        frame_gap = df_sorted.iloc[i]['Frame'] - df_sorted.iloc[i-1]['Frame']
+        
+        if frame_gap <= max_gap:
+            current_lick.append(df_sorted.iloc[i])
+        else:
+            if len(current_lick) > 0:
+                licks.append(pd.DataFrame(current_lick))
+            current_lick = [df_sorted.iloc[i]]
+    
+    # Add the last lick
+    if len(current_lick) > 0:
+        licks.append(pd.DataFrame(current_lick))
+    
+    return licks
+
+
+def find_lick_peaks(df, max_gap=5, peak_metric='y_max'):
+    """
+    Find peak position for each detected lick
+    
+    Parameters:
+    -----------
+    df : DataFrame with columns [Frame, X, Y, Probability]
+    max_gap : int, maximum frame gap to still consider part of same lick
+    peak_metric : str, how to define peak
+        'y_max' - maximum Y position (furthest extension)
+        'y_min' - minimum Y position
+        'distance' - furthest from initial position
+    
+    Returns:
+    --------
+    DataFrame with peak positions for each lick
+    """
+    licks = detect_licks(df, max_gap)
+    
+    peak_data = []
+    
+    for lick_id, lick_df in enumerate(licks):
+        if len(lick_df) == 0:
+            continue
+            
+        if peak_metric == 'y_max':
+            peak_idx = lick_df['Y'].idxmax()
+        elif peak_metric == 'y_min':
+            peak_idx = lick_df['Y'].idxmin()
+        elif peak_metric == 'distance':
+            # Distance from first position in lick
+            first_x, first_y = lick_df.iloc[0]['X'], lick_df.iloc[0]['Y']
+            distances = np.sqrt((lick_df['X'] - first_x)**2 + (lick_df['Y'] - first_y)**2)
+            peak_idx = distances.idxmax()
+        else:
+            peak_idx = lick_df['Y'].idxmax()
+        
+        peak_row = lick_df.loc[peak_idx].copy()
+        peak_data.append({
+            'lick_id': lick_id,
+            'frame': peak_row['Frame'],
+            'x': peak_row['X'],
+            'y': peak_row['Y'],
+            'probability': peak_row['Probability'],
+            'lick_duration': len(lick_df),
+            'lick_start_frame': lick_df['Frame'].min(),
+            'lick_end_frame': lick_df['Frame'].max()
+        })
+    
+    return pd.DataFrame(peak_data)
+
+
+def plot_lick_peaks(df, frame_range=None, max_gap=5, peak_metric='y_max', figsize=(12, 8)):
+    """
+    Plot only the peak positions for each detected lick
+    
+    Parameters:
+    -----------
+    df : DataFrame with columns [Frame, X, Y, Probability]
+    frame_range : tuple (start_frame, end_frame) or None for all frames
+    max_gap : int, maximum frame gap to still consider part of same lick
+    peak_metric : str, how to define peak ('y_max', 'y_min', 'distance')
+    figsize : tuple for figure size
+    """
+    if frame_range:
+        df_subset = df[(df['Frame'] >= frame_range[0]) & (df['Frame'] <= frame_range[1])].copy()
+    else:
+        df_subset = df.copy()
+    
+    peaks = find_lick_peaks(df_subset, max_gap, peak_metric)
+    
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Plot all trajectory in light gray
+    ax.plot(df_subset['X'], df_subset['Y'], 'o', color='lightgray', 
+            alpha=0.3, markersize=2, label='All positions')
+    
+    # Plot peak positions
+    scatter = ax.scatter(peaks['x'], peaks['y'], 
+                        c=peaks['lick_id'], 
+                        cmap='rainbow', 
+                        s=100, 
+                        edgecolors='black',
+                        linewidths=1.5,
+                        alpha=0.8,
+                        label='Lick peaks')
+    
+    # Annotate with lick numbers
+    for idx, row in peaks.iterrows():
+        ax.annotate(f"{int(row['lick_id'])}", 
+                   (row['x'], row['y']),
+                   xytext=(5, 5), 
+                   textcoords='offset points',
+                   fontsize=8,
+                   bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7))
+    
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label('Lick ID', rotation=270, labelpad=20)
+    
+    ax.set_xlabel('X Position (pixels)')
+    ax.set_ylabel('Y Position (pixels)')
+    ax.set_title(f'Lick Peak Positions ({len(peaks)} licks detected, metric: {peak_metric})')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    print(f"\nDetected {len(peaks)} licks")
+    print(f"Average lick duration: {peaks['lick_duration'].mean():.1f} frames")
+    
+    return fig, peaks
+
+
 def plot_trajectory(df, frame_range=None, figsize=(10, 8)):
     """
     Plot trajectory of tongue tip across frames
