@@ -1,1 +1,0 @@
-perform conv on entire video
